@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CyberShield — Check before you click</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --ink:#10131A;
+    --panel:#171B26;
+    --panel-2:#1D2230;
+    --line:#2A3040;
+    --text:#E8E6DF;
+    --muted:#8D93A3;
+    --amber:#FFB020;
+    --amber-dim:#4A3A16;
+    --teal:#2DD4BF;
+    --teal-dim:#123330;
+    --red:#FF5C5C;
+    --red-dim:#3A1818;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:var(--ink);
+    color:var(--text);
+    font-family:'IBM Plex Sans', system-ui, sans-serif;
+    line-height:1.5;
+  }
+  h1,h2,h3{
+    font-family:'Space Grotesk', sans-serif;
+    margin:0 0 .4em 0;
+    font-weight:600;
+    letter-spacing:-0.01em;
+  }
+  .mono{ font-family:'IBM Plex Mono', monospace; }
+  a{ color:var(--amber); }
+
+  /* Background scanline texture */
+  .scanfield{
+    position:fixed; inset:0; z-index:0; pointer-events:none;
+    background-image:
+      repeating-linear-gradient(180deg, rgba(255,255,255,0.015) 0px, rgba(255,255,255,0.015) 1px, transparent 1px, transparent 3px);
+    opacity:0.6;
+  }
+
+  header{
+    position:sticky; top:0; z-index:10;
+    background:rgba(16,19,26,0.92);
+    backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--line);
+    padding:16px 28px;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .brand{ display:flex; align-items:center; gap:10px; font-family:'Space Grotesk'; font-weight:700; font-size:18px; }
+  .brand .dot{ width:9px; height:9px; border-radius:50%; background:var(--teal); box-shadow:0 0 10px var(--teal); }
+  nav{ display:flex; gap:22px; }
+  nav a{ color:var(--muted); text-decoration:none; font-size:14px; }
+  nav a:hover{ color:var(--text); }
+
+  main{ position:relative; z-index:1; max-width:920px; margin:0 auto; padding:0 24px 100px; }
+
+  /* HERO — the scanner IS the hero */
+  .hero{ padding:64px 0 40px; }
+  .hero .kicker{ color:var(--muted); font-size:14px; margin-bottom:14px; max-width:60ch; }
+  .hero h1{ font-size:38px; max-width:16ch; }
+  .hero h1 .hl{ color:var(--amber); }
+
+  .scanner{
+    margin-top:34px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:22px;
+  }
+  .scanner-row{ display:flex; gap:10px; }
+  .scanner-row input{
+    flex:1;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--text);
+    font-family:'IBM Plex Mono';
+    font-size:14px;
+    padding:13px 14px;
+    border-radius:6px;
+    outline:none;
+  }
+  .scanner-row input:focus{ border-color:var(--amber); }
+  button{
+    font-family:'IBM Plex Sans';
+    font-weight:600;
+    font-size:14px;
+    background:var(--amber);
+    color:#1A1200;
+    border:none;
+    padding:0 22px;
+    border-radius:6px;
+    cursor:pointer;
+  }
+  button:hover{ filter:brightness(1.08); }
+  button.ghost{
+    background:transparent;
+    color:var(--text);
+    border:1px solid var(--line);
+  }
+
+  .verdict{
+    margin-top:16px;
+    padding:16px;
+    border-radius:8px;
+    border:1px solid var(--line);
+    display:none;
+  }
+  .verdict.show{ display:block; }
+  .verdict .vhead{ display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .badge{
+    font-family:'IBM Plex Mono';
+    font-size:12px;
+    padding:3px 9px;
+    border-radius:20px;
+  }
+  .badge.safe{ background:var(--teal-dim); color:var(--teal); }
+  .badge.caution{ background:var(--amber-dim); color:var(--amber); }
+  .badge.danger{ background:var(--red-dim); color:var(--red); }
+  .verdict ul{ margin:8px 0 0; padding-left:18px; color:var(--muted); font-size:14px; }
+  .verdict li{ margin-bottom:4px; }
+  .verdict li.flag{ color:var(--text); }
+
+  section{ padding:70px 0; border-top:1px solid var(--line); }
+  section > .lede{ color:var(--muted); max-width:56ch; margin-bottom:28px; }
+
+  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:24px; }
+
+  /* Password checker */
+  .pw-meter{ height:6px; background:var(--panel-2); border-radius:4px; overflow:hidden; margin:14px 0 6px; }
+  .pw-meter-fill{ height:100%; width:0%; background:var(--red); transition:width .25s ease, background .25s ease; }
+  .pw-label{ font-family:'IBM Plex Mono'; font-size:13px; color:var(--muted); display:flex; justify-content:space-between; }
+  .pw-checks{ margin-top:18px; display:grid; grid-template-columns:1fr 1fr; gap:8px 20px; }
+  .pw-checks div{ font-size:13px; color:var(--muted); display:flex; gap:8px; align-items:center; }
+  .pw-checks .ok{ color:var(--teal); }
+  .pw-checks .tick{ font-family:'IBM Plex Mono'; width:14px; }
+
+  /* Awareness feed */
+  .feed-item{
+    display:flex; gap:14px;
+    padding:16px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .feed-item:last-child{ border-bottom:none; }
+  .feed-tag{
+    font-family:'IBM Plex Mono'; font-size:11px; color:var(--ink);
+    background:var(--amber); border-radius:4px; padding:2px 7px;
+    height:fit-content; white-space:nowrap;
+  }
+  .feed-body h3{ font-size:15px; margin-bottom:3px; }
+  .feed-body p{ font-size:13px; color:var(--muted); margin:0; }
+  .feed-meta{ font-family:'IBM Plex Mono'; font-size:11px; color:var(--muted); margin-top:4px; }
+
+  .report-form{ display:grid; gap:12px; margin-top:20px; }
+  .report-form input, .report-form textarea, .report-form select{
+    background:var(--panel-2); border:1px solid var(--line); color:var(--text);
+    padding:11px 12px; border-radius:6px; font-family:'IBM Plex Sans'; font-size:14px;
+  }
+  .report-form textarea{ min-height:80px; resize:vertical; }
+  .report-form label{ font-size:12px; color:var(--muted); margin-bottom:-6px; }
+
+  footer{
+    border-top:1px solid var(--line);
+    padding:26px 24px;
+    color:var(--muted);
+    font-size:13px;
+    text-align:center;
+  }
+
+  @media (max-width:640px){
+    .hero h1{ font-size:28px; }
+    .scanner-row{ flex-direction:column; }
+    .pw-checks{ grid-template-columns:1fr; }
+    nav{ display:none; }
+  }
+</style>
+</head>
+<body>
+<div class="scanfield"></div>
+
+<header>
+  <div class="brand"><span class="dot"></span> CyberShield</div>
+  <nav>
+    <a href="#scan">URL Scanner</a>
+    <a href="#password">Password Check</a>
+    <a href="#feed">Scam Watch</a>
+    <a href="#report">Report</a>
+  </nav>
+</header>
+
+<main>
+  <section class="hero" id="scan">
+    <div class="kicker">Structure checks run on-device instantly. Link scans also cross-check VirusTotal's 70+ antivirus engines.</div>
+    <h1>Check <span class="hl">before</span> you click, type, or trust.</h1>
+
+    <div class="scanner">
+      <div class="scanner-row">
+        <input id="urlInput" type="text" placeholder="Paste a link to scan — e.g. http://paypa1-secure.verify-account.xyz/login" />
+        <button onclick="scanUrl()">Scan</button>
+      </div>
+      <div class="verdict" id="urlVerdict">
+        <div class="vhead">
+          <span class="badge" id="urlBadge"></span>
+          <strong id="urlHeadline"></strong>
+        </div>
+        <ul id="urlFlags"></ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="password">
+    <h2>Password strength check</h2>
+    <p class="lede">Estimates how long a password would take to guess, based on length, character variety, and common patterns. Checked locally — never sent anywhere.</p>
+
+    <div class="panel">
+      <div class="scanner-row">
+        <input id="pwInput" type="text" placeholder="Type a password to test" oninput="checkPassword()" />
+        <button class="ghost" id="pwToggle" onclick="togglePw()">Show</button>
+      </div>
+      <div class="pw-meter"><div class="pw-meter-fill" id="pwFill"></div></div>
+      <div class="pw-label"><span id="pwStrengthLabel">Enter a password above</span><span id="pwCrackTime" class="mono"></span></div>
+
+      <div class="pw-checks">
+        <div id="chk-len"><span class="tick">○</span> At least 12 characters</div>
+        <div id="chk-upper"><span class="tick">○</span> Upper and lowercase mix</div>
+        <div id="chk-num"><span class="tick">○</span> Contains a number</div>
+        <div id="chk-sym"><span class="tick">○</span> Contains a symbol</div>
+        <div id="chk-common"><span class="tick">○</span> Not a common password</div>
+        <div id="chk-repeat"><span class="tick">○</span> No long repeats/sequences</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="feed">
+    <h2>Scam watch</h2>
+    <p class="lede">Recent scam patterns to know, plus anything the community reports below.</p>
+    <div class="panel" id="feedList"></div>
+  </section>
+
+  <section id="report">
+    <h2>Report a scam</h2>
+    <p class="lede">Seen a suspicious message, call, or link? Log it here to warn others. This demo stores reports in your session only — wire it to a database to make it persistent.</p>
+    <div class="panel">
+      <div class="report-form">
+        <div>
+          <label>Type</label>
+          <select id="repType">
+            <option>Phishing link</option>
+            <option>OTP / UPI scam</option>
+            <option>Fake job offer</option>
+            <option>Impersonation call</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div>
+          <label>What happened</label>
+          <textarea id="repDetail" placeholder="Briefly describe the message, link, or call..."></textarea>
+        </div>
+        <button onclick="submitReport()" style="justify-self:start;">Submit report</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  CyberShield — built as a hackathon prototype. All checks run in-browser; no backend, no data leaves this page.
+</footer>
+
+<script>
+/* ============================================================
+   CONFIG — fill these in
+   ============================================================ */
+const SUPABASE_URL = 'https://jucitboxkshzoavaigrj.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_s731RmCWUNs-AMZyjulf-g_0RwGHaeR';
+
+const supabaseReady = SUPABASE_URL.startsWith('http') && SUPABASE_ANON_KEY.length > 10;
+const sbClient = supabaseReady ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+const threatCheckReady = supabaseReady; // uses the scan-url Edge Function, keyed server-side
+
+/* ---------- URL / phishing scanner ---------- */
+const SHORTENERS = ['bit.ly','tinyurl.com','t.co','goo.gl','ow.ly','is.gd','buff.ly','rebrand.ly','cutt.ly'];
+const SUSPICIOUS_TLDS = ['.xyz','.top','.club','.gq','.tk','.work','.click','.loan','.zip','.mov','.men','.rest'];
+const BRANDS = ['paypal.com','google.com','facebook.com','amazon.com','apple.com','microsoft.com',
+                'netflix.com','instagram.com','whatsapp.com','sbi.co.in','icicibank.com','hdfcbank.com',
+                'flipkart.com','indiapost.gov.in'];
+
+function levenshtein(a,b){
+  const m=a.length,n=b.length;
+  const d=Array.from({length:m+1},()=>new Array(n+1).fill(0));
+  for(let i=0;i<=m;i++) d[i][0]=i;
+  for(let j=0;j<=n;j++) d[0][j]=j;
+  for(let i=1;i<=m;i++){
+    for(let j=1;j<=n;j++){
+      const cost = a[i-1]===b[j-1] ? 0 : 1;
+      d[i][j] = Math.min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+cost);
+    }
+  }
+  return d[m][n];
+}
+
+async function checkThreatIntel(rawUrl){
+  try{
+    const { data, error } = await sbClient.functions.invoke('scan-url', { body: { url: rawUrl } });
+    if(error) return { ok:false };
+    return { ok:true, ...data };
+  }catch(e){
+    return { ok:false };
+  }
+}
+
+async function scanUrl(){
+  const raw = document.getElementById('urlInput').value.trim();
+  const box = document.getElementById('urlVerdict');
+  const badge = document.getElementById('urlBadge');
+  const headline = document.getElementById('urlHeadline');
+  const flagsEl = document.getElementById('urlFlags');
+  flagsEl.innerHTML = '';
+  box.classList.add('show');
+
+  if(!raw){
+    badge.className='badge caution'; badge.textContent='NO INPUT';
+    headline.textContent='Paste a link first.';
+    return;
+  }
+
+  let url;
+  try{
+    url = new URL(raw.match(/^https?:\/\//) ? raw : 'http://'+raw);
+  }catch(e){
+    badge.className='badge caution'; badge.textContent='UNREADABLE';
+    headline.textContent="That doesn't look like a valid URL.";
+    return;
+  }
+
+  const host = url.hostname.toLowerCase();
+  const flags = [];
+  let score = 0;
+
+  if(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)){
+    flags.push('Link uses a raw IP address instead of a domain name — a common cloaking trick.');
+    score += 35;
+  }
+  if(raw.includes('@')){
+    flags.push("Contains an '@' symbol — everything before it can be a decoy; browsers navigate to what's after it.");
+    score += 30;
+  }
+  if(url.protocol !== 'https:'){
+    flags.push('Not using HTTPS — data sent to this site is not encrypted in transit.');
+    score += 15;
+  }
+  const subdomainCount = host.split('.').length - 2;
+  if(subdomainCount >= 3){
+    flags.push(`Unusually deep subdomain chain (${host}) — often used to bury the real domain.`);
+    score += 15;
+  }
+  if(SHORTENERS.some(s => host === s || host.endsWith('.'+s))){
+    flags.push('This is a link shortener — the real destination is hidden until you click.');
+    score += 20;
+  }
+  if(SUSPICIOUS_TLDS.some(t => host.endsWith(t))){
+    flags.push(`Domain ending "${host.slice(host.lastIndexOf('.'))}" is disproportionately used for throwaway scam sites.`);
+    score += 15;
+  }
+  if((host.match(/-/g)||[]).length >= 2){
+    flags.push('Domain has multiple hyphens — a pattern used to mimic real brand names.');
+    score += 10;
+  }
+  const rootDomain = host.split('.').slice(-2).join('.');
+  let closestBrand = null, closestDist = 99;
+  for(const b of BRANDS){
+    const dist = levenshtein(rootDomain, b);
+    if(dist < closestDist){ closestDist = dist; closestBrand = b; }
+  }
+  if(closestDist > 0 && closestDist <= 2 && rootDomain !== closestBrand){
+    flags.push(`Very close to "${closestBrand}" (differs by ${closestDist} character${closestDist>1?'s':''}) but isn't the real domain — classic lookalike spoofing.`);
+    score += 35;
+  }
+  if(raw.length > 90){
+    flags.push('Unusually long URL — often used to hide the true destination in the middle.');
+    score += 10;
+  }
+
+  score = Math.min(score, 100);
+
+  // Render heuristic result first
+  const renderFlags = (extra) => {
+    flagsEl.innerHTML = '';
+    const all = [...flags, ...extra];
+    if(all.length === 0){
+      badge.className='badge safe'; badge.textContent='NO FLAGS';
+      headline.textContent='Nothing suspicious found in structure or Google\u2019s threat lists.';
+      const li=document.createElement('li');
+      li.textContent='Still verify the sender and avoid entering passwords on unfamiliar sites — no checker is 100% complete.';
+      flagsEl.appendChild(li);
+    } else {
+      headline.textContent = `${all.length} warning sign${all.length>1?'s':''} found.`;
+      all.forEach(f=>{
+        const li=document.createElement('li');
+        li.className='flag';
+        li.textContent = f;
+        flagsEl.appendChild(li);
+      });
+    }
+  };
+
+  let liveFlags = [];
+  let liveHit = false;
+
+  if(threatCheckReady){
+    badge.className='badge caution'; badge.textContent='SCANNING…';
+    headline.textContent = 'Checking VirusTotal (70+ engines)…';
+    const vt = await checkThreatIntel(url.href);
+    if(vt.ok && vt.status === 'ok'){
+      if(vt.malicious > 0){
+        liveHit = true;
+        liveFlags.push(`VirusTotal: ${vt.malicious} of ${vt.total} security engines flag this URL as malicious.`);
+        score = 100;
+      } else if(vt.suspicious > 0){
+        liveFlags.push(`VirusTotal: ${vt.suspicious} of ${vt.total} engines mark this URL as suspicious.`);
+        score = Math.max(score, 40);
+      }
+    } else if(vt.ok && vt.status === 'pending'){
+      liveFlags.push('This URL is new to VirusTotal — analysis is still in progress. Try scanning again in a minute.');
+    } else {
+      liveFlags.push('Live threat-database check unavailable right now — showing structural analysis only.');
+    }
+  }
+
+  renderFlags(liveFlags);
+
+  if(liveHit || score >= 50){
+    badge.className='badge danger'; badge.textContent='HIGH RISK';
+  } else if(flags.length > 0 || (liveFlags.length && !liveHit)){
+    badge.className='badge caution'; badge.textContent='USE CAUTION';
+  } else {
+    badge.className='badge safe'; badge.textContent='NO FLAGS';
+  }
+}
+
+/* ---------- Password checker ---------- */
+const COMMON_PASSWORDS = ['password','123456','123456789','qwerty','abc123','password1','111111',
+  '12345678','letmein','iloveyou','admin','welcome','monkey','dragon','football','000000','123123',
+  '1234567','qwertyuiop','princess','login'];
+
+function togglePw(){
+  const el = document.getElementById('pwInput');
+  const btn = document.getElementById('pwToggle');
+  el.type = el.type === 'password' ? 'text' : 'password';
+  btn.textContent = el.type === 'password' ? 'Show' : 'Hide';
+}
+
+function hasSequential(s){
+  const seqs = ['abcdefghijklmnopqrstuvwxyz','0123456789','qwertyuiop'];
+  const low = s.toLowerCase();
+  for(const seq of seqs){
+    for(let i=0;i<=seq.length-4;i++){
+      if(low.includes(seq.slice(i,i+4))) return true;
+    }
+  }
+  return /(.)\1{3,}/.test(s); // 4+ repeated char
+}
+
+function checkPassword(){
+  const pw = document.getElementById('pwInput').value;
+  const fill = document.getElementById('pwFill');
+  const label = document.getElementById('pwStrengthLabel');
+  const crack = document.getElementById('pwCrackTime');
+
+  const checks = {
+    len: pw.length >= 12,
+    upper: /[a-z]/.test(pw) && /[A-Z]/.test(pw),
+    num: /[0-9]/.test(pw),
+    sym: /[^a-zA-Z0-9]/.test(pw),
+    common: pw.length>0 && !COMMON_PASSWORDS.includes(pw.toLowerCase()),
+    repeat: pw.length>0 && !hasSequential(pw)
+  };
+
+  Object.entries(checks).forEach(([key,pass])=>{
+    const row = document.getElementById('chk-'+key);
+    const tick = row.querySelector('.tick');
+    if(pw.length===0){ row.classList.remove('ok'); tick.textContent='○'; return; }
+    row.classList.toggle('ok', pass);
+    tick.textContent = pass ? '●' : '○';
+  });
+
+  if(pw.length===0){
+    fill.style.width='0%'; fill.style.background='var(--red)';
+    label.textContent='Enter a password above'; crack.textContent='';
+    return;
+  }
+
+  let poolSize = 0;
+  if(/[a-z]/.test(pw)) poolSize += 26;
+  if(/[A-Z]/.test(pw)) poolSize += 26;
+  if(/[0-9]/.test(pw)) poolSize += 10;
+  if(/[^a-zA-Z0-9]/.test(pw)) poolSize += 32;
+  poolSize = poolSize || 1;
+
+  let bits = pw.length * Math.log2(poolSize);
+  if(COMMON_PASSWORDS.includes(pw.toLowerCase())) bits = 5;
+  if(hasSequential(pw)) bits = Math.min(bits, 20);
+
+  const guessesPerSecond = 1e10; // offline fast hash assumption
+  const seconds = Math.pow(2, bits) / guessesPerSecond;
+
+  let strength, color, pct;
+  if(bits < 28){ strength='Very weak'; color='var(--red)'; pct=15; }
+  else if(bits < 40){ strength='Weak'; color='var(--red)'; pct=35; }
+  else if(bits < 60){ strength='Fair'; color='var(--amber)'; pct=55; }
+  else if(bits < 80){ strength='Strong'; color='var(--teal)'; pct=80; }
+  else{ strength='Very strong'; color='var(--teal)'; pct=100; }
+
+  fill.style.width = pct+'%';
+  fill.style.background = color;
+  label.textContent = strength;
+  crack.textContent = 'crack time (est.): ' + formatTime(seconds);
+}
+
+function formatTime(seconds){
+  if(seconds < 1) return 'instant';
+  const units = [
+    ['year',31536000],['day',86400],['hour',3600],['minute',60],['second',1]
+  ];
+  for(const [name,secs] of units){
+    if(seconds >= secs){
+      const val = seconds/secs;
+      if(val > 1000) return '>1000 '+name+'s';
+      return Math.round(val*10)/10 + ' ' + name + (val>=2?'s':'');
+    }
+  }
+  return 'instant';
+}
+
+/* ---------- Scam watch feed + reporting (in-memory demo) ---------- */
+let feedItems = [
+  { tag:'UPI SCAM', title:'"Refund" QR code requests', detail:'Callers claiming to be from a delivery or payment app ask you to scan a QR code or enter your UPI PIN to "receive" a refund. Scanning or entering a PIN is only ever needed to pay — never to receive money.', meta:'Widely reported — Aug 2026' },
+  { tag:'OTP SCAM', title:'Fake bank verification calls', detail:'A caller poses as bank/KYC staff and asks you to read out an OTP to "verify" or "prevent account block." Banks never ask for OTPs over a call.', meta:'Ongoing pattern' },
+  { tag:'JOB SCAM', title:'"Work from home" task scams', detail:'Job offers on WhatsApp/Telegram ask for a small upfront "registration" or "task" payment before any real work begins. Legitimate employers never charge you to get hired.', meta:'Common on messaging apps' },
+  { tag:'COURIER SCAM', title:'Fake "parcel held at customs" messages', detail:'SMS/WhatsApp messages claim a parcel is stuck and ask you to pay a small "clearance fee" via a link. The link usually leads to a card-detail harvesting page.', meta:'Common pattern' },
+];
+
+function timeAgo(iso){
+  const diff = (Date.now() - new Date(iso).getTime())/1000;
+  if(diff < 60) return 'just now';
+  if(diff < 3600) return Math.floor(diff/60)+'m ago';
+  if(diff < 86400) return Math.floor(diff/3600)+'h ago';
+  return Math.floor(diff/86400)+'d ago';
+}
+
+function renderFeed(liveReports){
+  const el = document.getElementById('feedList');
+  el.innerHTML = '';
+  const combined = [...(liveReports||[]), ...feedItems];
+  combined.forEach(item=>{
+    const div = document.createElement('div');
+    div.className = 'feed-item';
+    div.innerHTML = `
+      <span class="feed-tag">${item.tag}</span>
+      <div class="feed-body">
+        <h3>${item.title}</h3>
+        <p>${item.detail}</p>
+        <div class="feed-meta">${item.meta}</div>
+      </div>`;
+    el.appendChild(div);
+  });
+}
+
+async function loadReports(){
+  if(!supabaseReady){ renderFeed([]); return; }
+  const { data, error } = await sbClient
+    .from('reports')
+    .select('*')
+    .order('created_at', { ascending:false })
+    .limit(50);
+  if(error){ console.error(error); renderFeed([]); return; }
+  const live = data.map(r => ({
+    tag: r.type.toUpperCase(),
+    title: 'Community report',
+    detail: r.detail,
+    meta: timeAgo(r.created_at)
+  }));
+  renderFeed(live);
+}
+
+async function submitReport(){
+  const type = document.getElementById('repType').value;
+  const detail = document.getElementById('repDetail').value.trim();
+  if(!detail){ alert('Add a short description before submitting.'); return; }
+
+  if(supabaseReady){
+    const { error } = await sbClient.from('reports').insert({ type, detail });
+    if(error){ console.error(error); alert('Could not save report — check Supabase config.'); return; }
+    document.getElementById('repDetail').value = '';
+    await loadReports();
+  } else {
+    feedItems.unshift({ tag: type.toUpperCase(), title:'Community report', detail, meta:'Reported just now (not saved — Supabase not configured)' });
+    document.getElementById('repDetail').value = '';
+    renderFeed([]);
+  }
+  document.getElementById('feed').scrollIntoView({behavior:'smooth'});
+}
+
+loadReports();
+</script>
+</body>
+</html>
